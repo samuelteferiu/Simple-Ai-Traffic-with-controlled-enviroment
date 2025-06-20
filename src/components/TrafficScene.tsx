@@ -91,9 +91,13 @@ const TrafficScene: React.FC = () => {
     setupMouseControls();
 
     // Animation loop
+    let lastTime = performance.now();
     const animate = () => {
       animationIdRef.current = requestAnimationFrame(animate);
-      updateCars();
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000; // seconds
+      lastTime = now;
+      updateCars(delta);
       updateCameraControls();
       animateEnvironment();
       renderer.render(scene, camera);
@@ -221,13 +225,13 @@ const TrafficScene: React.FC = () => {
     const roadMaterial = new THREE.MeshLambertMaterial({ map: roadTexture });
     
     // Roads with textures - now wider to accommodate two lanes
-    const horizontalRoad = new THREE.PlaneGeometry(30, 8); // Increased width to 8
+    const horizontalRoad = new THREE.PlaneGeometry(36, 8); // Matches grass ends at ±18
     const horizontalRoadMesh = new THREE.Mesh(horizontalRoad, roadMaterial);
     horizontalRoadMesh.rotation.x = -Math.PI / 2;
     horizontalRoadMesh.receiveShadow = true;
     scene.add(horizontalRoadMesh);
 
-    const verticalRoad = new THREE.PlaneGeometry(8, 30); // Increased width to 8
+    const verticalRoad = new THREE.PlaneGeometry(8, 36); // Matches grass ends at ±18
     const verticalRoadMesh = new THREE.Mesh(verticalRoad, roadMaterial);
     verticalRoadMesh.rotation.x = -Math.PI / 2;
     verticalRoadMesh.receiveShadow = true;
@@ -727,19 +731,19 @@ const TrafficScene: React.FC = () => {
 
     switch (direction) {
       case 'north':
-        startPosition.set(-2, 0, -15);
+        startPosition.set(-2, 0, -16);
         initialRotation = 0;
         break;
       case 'south':
-        startPosition.set(2, 0, 15);
+        startPosition.set(2, 0, 16);
         initialRotation = Math.PI;
         break;
       case 'east':
-        startPosition.set(-15, 0, -2);
+        startPosition.set(-16, 0, 2);
         initialRotation = Math.PI / 2;
         break;
       case 'west':
-        startPosition.set(15, 0, 2);
+        startPosition.set(16, 0, -2);
         initialRotation = -Math.PI / 2;
         break;
     }
@@ -757,7 +761,7 @@ const TrafficScene: React.FC = () => {
       isWaiting: true,
       targetPosition: startPosition.clone(),
       currentPosition: startPosition.clone(),
-      speed: 0.027,
+      speed: 8,
       id,
       state: 'waiting',
       originalColor: 0xff0000
@@ -794,7 +798,7 @@ const TrafficScene: React.FC = () => {
     });
   };
 
-  const updateCars = () => {
+  const updateCars = (delta: number) => {
     if (!sceneRef.current) return;
 
     // Group cars by direction to easily find the first waiting car in each lane
@@ -822,7 +826,7 @@ const TrafficScene: React.FC = () => {
           car.isWaiting = false;
           setCarTarget(car);
         }
-        moveCar(car);
+        moveCar(car, delta);
       } else {
         car.isWaiting = true;
         car.state = 'waiting';
@@ -926,9 +930,9 @@ const TrafficScene: React.FC = () => {
     }
   };
 
-  const moveCar = (car: Car) => {
+  const moveCar = (car: Car, delta: number) => {
     const directionVector = car.targetPosition.clone().sub(car.mesh.position).normalize();
-    const movement = directionVector.multiplyScalar(car.speed);
+    const movement = directionVector.multiplyScalar(car.speed * delta);
 
     let collisionDetected = false;
     const nextPosition = car.mesh.position.clone().add(movement);
@@ -950,16 +954,16 @@ const TrafficScene: React.FC = () => {
       // Move car along its current direction
       switch (car.direction) {
         case 'north':
-          car.mesh.position.z += car.speed;
+          car.mesh.position.z += car.speed * delta;
           break;
         case 'south':
-          car.mesh.position.z -= car.speed;
+          car.mesh.position.z -= car.speed * delta;
           break;
         case 'east':
-          car.mesh.position.x += car.speed;
+          car.mesh.position.x += car.speed * delta;
           break;
         case 'west':
-          car.mesh.position.x -= car.speed;
+          car.mesh.position.x -= car.speed * delta;
           break;
       }
 
@@ -986,19 +990,19 @@ const TrafficScene: React.FC = () => {
 
     switch (car.direction) {
       case 'north':
-        startPosition.set(-2, 0, -15); // Moved to left lane
+        startPosition.set(-2, 0, -16);
         initialRotation = 0;
         break;
       case 'south':
-        startPosition.set(2, 0, 15); // Moved to right lane
+        startPosition.set(2, 0, 16);
         initialRotation = Math.PI;
         break;
       case 'east':
-        startPosition.set(-15, 0, -2); // Moved to bottom lane
+        startPosition.set(-16, 0, 2);
         initialRotation = Math.PI / 2;
         break;
       case 'west':
-        startPosition.set(15, 0, 2); // Moved to top lane
+        startPosition.set(16, 0, -2);
         initialRotation = -Math.PI / 2;
         break;
     }
@@ -1042,7 +1046,8 @@ const TrafficScene: React.FC = () => {
   const handleNextCar = () => {
     console.log("handleNextCar button pressed - functionality removed");
   };
-return (
+
+  return (
     <div className="relative w-full h-screen">
       <div ref={mountRef} className="w-full h-full" />
 
