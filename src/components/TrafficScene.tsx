@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 
+const CAR_SPEED = 8.1;
+
 interface Car {
   mesh: THREE.Mesh;
   direction: 'north' | 'south' | 'east' | 'west';
@@ -8,7 +10,6 @@ interface Car {
   isWaiting: boolean;
   targetPosition: THREE.Vector3;
   currentPosition: THREE.Vector3;
-  speed: number;
   id: string;
   state: 'waiting' | 'moving' | 'turning' | 'stopped';
   originalColor: number;
@@ -32,8 +33,9 @@ const TrafficScene: React.FC = () => {
   const buildingsRef = useRef<THREE.Group[]>([]);
   const treesRef = useRef<THREE.Group[]>([]);
   
-  const [lightState, setLightState] = useState<'red' | 'yellow' | 'green'>('green');
-  const [timer, setTimer] = useState(8);
+  const [trafficPhase, setTrafficPhase] = useState<'green' | 'yellow' | 'red'>('green');
+  const [trafficDirection, setTrafficDirection] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [phaseTimer, setPhaseTimer] = useState(8); // Start with green phase
   const [activeDirections, setActiveDirections] = useState<'vertical' | 'horizontal'>('horizontal');
   const [cameraMode, setCameraMode] = useState<'orbit' | 'top' | 'street'>('orbit');
   const [isNightMode, setIsNightMode] = useState(false);
@@ -104,65 +106,34 @@ const TrafficScene: React.FC = () => {
     };
     animate();
 
-    // Traffic light timer
-    const trafficTimer = setInterval(() => {
-      setTimer(prev => {
+    // Traffic light phase timer
+    const phaseInterval = setInterval(() => {
+      setPhaseTimer(prev => {
         if (prev <= 1) {
-          // Update light state
-          setLightState(current => {
-            if (current === 'green') {
-              // After green, turn yellow
-              setIsYellowPhase(true);
+          // Phase transition
+          setTrafficPhase(currentPhase => {
+            if (currentPhase === 'green') {
+              setPhaseTimer(3); // yellow
               return 'yellow';
-            } else if (current === 'yellow') {
-              // After yellow, switch directions and turn red
-              setActiveDirections(activeDirections === 'vertical' ? 'horizontal' : 'vertical');
-              setIsYellowPhase(false);
-              return 'red';
-            } else { // current === 'red'
-              // After red, turn green
-              setIsYellowPhase(false);
+            } else if (currentPhase === 'yellow') {
+              setPhaseTimer(8); // red (other direction green)
+              // Switch direction and set to green
+              setTrafficDirection(dir => {
+                const newDir = dir === 'horizontal' ? 'vertical' : 'horizontal';
+                setTrafficPhase('green');
+                setPhaseTimer(8);
+                return newDir;
+              });
+              return 'red'; // This will be immediately replaced by green in the new direction
+            } else { // red
+              // Should not stay in red, always switch to green in the other direction
+              setPhaseTimer(8);
               return 'green';
             }
           });
-
-          // Set new timer based on current state
-          if (lightState === 'green') {
-            return 8; // 8 seconds for green phase
-          } else if (lightState === 'yellow') {
-            return 3; // 3 seconds for yellow phase
-          } else {
-            return 8; // 8 seconds for red phase
-          }
+          return 3; // default for yellow, will be overwritten for green
         }
         return prev - 1;
-      });
-
-      // Update traffic lights based on the current state
-      trafficLightsRef.current.forEach(light => {
-        const isVertical = light.direction === 'north' || light.direction === 'south';
-        const isHorizontal = light.direction === 'east' || light.direction === 'west';
-
-        if (lightState === 'green') {
-          // Set green for active direction and red for inactive direction
-          if ((activeDirections === 'vertical' && isVertical) || 
-              (activeDirections === 'horizontal' && isHorizontal)) {
-            light.state = 'green';
-          } else {
-            light.state = 'red';
-          }
-        } else if (lightState === 'yellow') {
-          // Set yellow for active direction and keep red for inactive direction
-          if ((activeDirections === 'vertical' && isVertical) || 
-              (activeDirections === 'horizontal' && isHorizontal)) {
-            light.state = 'yellow';
-          } else {
-            light.state = 'red';
-          }
-        } else {
-          // All lights are red
-          light.state = 'red';
-        }
       });
     }, 1000);
 
@@ -171,13 +142,26 @@ const TrafficScene: React.FC = () => {
       if (animationIdRef.current) {
         cancelAnimationFrame(animationIdRef.current);
       }
-      clearInterval(trafficTimer);
+      clearInterval(phaseInterval);
       if (mountRef.current && renderer.domElement) {
         mountRef.current.removeChild(renderer.domElement);
       }
       renderer.dispose();
     };
-  }, [lightState, activeDirections]);
+  }, []);
+
+  // Update traffic lights based on the current phase and direction
+  useEffect(() => {
+    trafficLightsRef.current.forEach(light => {
+      const isActive = (trafficDirection === 'horizontal' && (light.direction === 'east' || light.direction === 'west')) ||
+                      (trafficDirection === 'vertical' && (light.direction === 'north' || light.direction === 'south'));
+      if (isActive) {
+        light.state = trafficPhase;
+      } else {
+        light.state = 'red';
+      }
+    });
+  }, [trafficPhase, trafficDirection]);
 
   const setupLighting = (scene: THREE.Scene) => {
     // Ambient light
@@ -761,7 +745,6 @@ const TrafficScene: React.FC = () => {
       isWaiting: true,
       targetPosition: startPosition.clone(),
       currentPosition: startPosition.clone(),
-      speed: 8,
       id,
       state: 'waiting',
       originalColor: 0xff0000
@@ -779,16 +762,16 @@ const TrafficScene: React.FC = () => {
         let offset = 3 * i; // Increase offset for more spacing
         switch (direction) {
           case 'north':
-            car.mesh.position.z -= offset;
+            car.mesh.position.z += CAR_SPEED * offset;
             break;
           case 'south':
-            car.mesh.position.z += offset;
+            car.mesh.position.z -= CAR_SPEED * offset;
             break;
           case 'east':
-            car.mesh.position.x -= offset;
+            car.mesh.position.x += CAR_SPEED * offset;
             break;
           case 'west':
-            car.mesh.position.x += offset;
+            car.mesh.position.x -= CAR_SPEED * offset;
             break;
         }
         car.currentPosition.copy(car.mesh.position); // Initialize currentPosition
@@ -815,13 +798,30 @@ const TrafficScene: React.FC = () => {
       const carTrafficLight = trafficLightsRef.current.find(light => light.direction === car.direction);
 
       // Check if this car's light is green and the overall light is green
-      const isCarLightGreen = carTrafficLight?.state === 'green' && lightState === 'green';
+      const isCarLightGreen = carTrafficLight?.state === 'green' && trafficPhase === 'green';
 
       // Find the first waiting car in this car's lane
       const firstWaitingCarInLane = carsByDirection[car.direction]?.find(c => c.isWaiting);
 
-      // Only allow movement if the car is the first in its lane and the light is green
-      if (isCarLightGreen && car === firstWaitingCarInLane) {
+      // --- INTERSECTION LOGIC ---
+      // Cars should only stop at the crossing spot (edge of intersection) if the light is not green
+      let allowMove = false;
+      let atCrossing = false;
+      if (car.direction === 'north') {
+        allowMove = car.mesh.position.z > -4; // in or past intersection
+        atCrossing = Math.abs(car.mesh.position.z + 4) < 0.5; // close to -4
+      } else if (car.direction === 'south') {
+        allowMove = car.mesh.position.z < 4;
+        atCrossing = Math.abs(car.mesh.position.z - 4) < 0.5; // close to 4
+      } else if (car.direction === 'east') {
+        allowMove = car.mesh.position.x > -4;
+        atCrossing = Math.abs(car.mesh.position.x + 4) < 0.5; // close to -4
+      } else if (car.direction === 'west') {
+        allowMove = car.mesh.position.x < 4;
+        atCrossing = Math.abs(car.mesh.position.x - 4) < 0.5; // close to 4
+      }
+
+      if (allowMove || (isCarLightGreen && car === firstWaitingCarInLane) || (!isCarLightGreen && !atCrossing)) {
         if (car.isWaiting) {
           car.isWaiting = false;
           setCarTarget(car);
@@ -932,7 +932,7 @@ const TrafficScene: React.FC = () => {
 
   const moveCar = (car: Car, delta: number) => {
     const directionVector = car.targetPosition.clone().sub(car.mesh.position).normalize();
-    const movement = directionVector.multiplyScalar(car.speed * delta);
+    const movement = directionVector.multiplyScalar(CAR_SPEED * delta);
 
     let collisionDetected = false;
     const nextPosition = car.mesh.position.clone().add(movement);
@@ -954,16 +954,36 @@ const TrafficScene: React.FC = () => {
       // Move car along its current direction
       switch (car.direction) {
         case 'north':
-          car.mesh.position.z += car.speed * delta;
+          car.mesh.position.z += CAR_SPEED * delta;
+          // Reset at the end of the road (z >= 16)
+          if (car.mesh.position.z >= 16) {
+            resetCar(car);
+            return;
+          }
           break;
         case 'south':
-          car.mesh.position.z -= car.speed * delta;
+          car.mesh.position.z -= CAR_SPEED * delta;
+          // Reset at the end of the road (z <= -16)
+          if (car.mesh.position.z <= -16) {
+            resetCar(car);
+            return;
+          }
           break;
         case 'east':
-          car.mesh.position.x += car.speed * delta;
+          car.mesh.position.x += CAR_SPEED * delta;
+          // Reset at the end of the road (x >= 16)
+          if (car.mesh.position.x >= 16) {
+            resetCar(car);
+            return;
+          }
           break;
         case 'west':
-          car.mesh.position.x -= car.speed * delta;
+          car.mesh.position.x -= CAR_SPEED * delta;
+          // Reset at the end of the road (x <= -16)
+          if (car.mesh.position.x <= -16) {
+            resetCar(car);
+            return;
+          }
           break;
       }
 
@@ -971,12 +991,13 @@ const TrafficScene: React.FC = () => {
       car.state = 'moving';
       updateCarAppearance(car);
 
-      // Check if car has reached its target
-      if (car.mesh.position.distanceTo(car.targetPosition) < 1.0) {
+      // Check if car has reached its target (for north/south)
+      if ((car.direction === 'north' || car.direction === 'south') && car.mesh.position.distanceTo(car.targetPosition) < 1.0) {
         resetCar(car);
       }
     } else {
       car.state = 'stopped';
+      car.isWaiting = false;
       updateCarAppearance(car);
     }
   };
@@ -1034,7 +1055,7 @@ const TrafficScene: React.FC = () => {
       return acc;
     }, {} as { [key: string]: string });
     setCarStates(states);
-  }, [carsRef.current.map(car => car.state).join(), lightState]);
+  }, [carsRef.current.map(car => car.state).join(), trafficPhase]);
 
   const toggleNightMode = () => {
     setIsNightMode(prev => !prev);
@@ -1047,15 +1068,14 @@ const TrafficScene: React.FC = () => {
     console.log("handleNextCar button pressed - functionality removed");
   };
 
-  return (
+return (
     <div className="relative w-full h-screen">
       <div ref={mountRef} className="w-full h-full" />
 
       {/* Enhanced Control Panel */}
       <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white p-4 rounded-lg max-w-sm">
         <div className="text-lg font-bold mb-2">🚦 Traffic Control System</div>
-        <div className="text-sm">Active Directions: {activeDirections.toUpperCase()}</div>
-        <div className="text-sm mt-2">
+          <div className="text-sm">Active Directions: {trafficDirection.toUpperCase()}</div>        <div className="text-sm mt-2">
           Car States:
           {Object.entries(carStates).map(([carId, state]) => (
             <div key={carId} className="ml-2">
