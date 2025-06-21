@@ -38,6 +38,7 @@ const TrafficScene: React.FC = () => {
   const [phaseTimer, setPhaseTimer] = useState(8); // Start with green phase
   const [activeDirections, setActiveDirections] = useState<'vertical' | 'horizontal'>('horizontal');
   const [cameraMode, setCameraMode] = useState<'orbit' | 'top' | 'street'>('orbit');
+  const cameraModeRef = useRef<'orbit' | 'top' | 'street'>(cameraMode);
   const [isNightMode, setIsNightMode] = useState(false);
   const [carStates, setCarStates] = useState<{ [key: string]: string }>({});
   const [lastActiveDirection, setLastActiveDirection] = useState<'vertical' | 'horizontal'>('horizontal');
@@ -46,6 +47,24 @@ const TrafficScene: React.FC = () => {
   // Camera controls state
   const mouseRef = useRef({ x: 0, y: 0, isDown: false });
   const cameraRotationRef = useRef({ x: 0, y: 0 });
+
+  // Helper to change camera mode and update camera instantly
+  const handleCameraModeChange = (mode: 'orbit' | 'top' | 'street') => {
+    setCameraMode(mode);
+    if (mode === 'top' || mode === 'street') {
+      cameraRotationRef.current = { x: 0, y: 0 };
+    }
+    // Remove direct camera update here; rely on useEffect
+  };
+
+  // Add this useEffect to update camera when cameraMode changes
+  useEffect(() => {
+    cameraModeRef.current = cameraMode;
+    if (cameraMode === 'top' || cameraMode === 'street') {
+      cameraRotationRef.current = { x: 0, y: 0 };
+    }
+    updateCameraControls();
+  }, [cameraMode]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -100,7 +119,9 @@ const TrafficScene: React.FC = () => {
       const delta = (now - lastTime) / 1000; // seconds
       lastTime = now;
       updateCars(delta);
-      updateCameraControls();
+      if (cameraModeRef.current === 'orbit') {
+        updateCameraControls();
+      }
       animateEnvironment();
       renderer.render(scene, camera);
     };
@@ -164,12 +185,17 @@ const TrafficScene: React.FC = () => {
   }, [trafficPhase, trafficDirection]);
 
   const setupLighting = (scene: THREE.Scene) => {
+    // Remove all existing lights
+    scene.children = scene.children.filter(obj => {
+      // Remove AmbientLight, DirectionalLight, PointLight
+      return !(obj instanceof THREE.AmbientLight || obj instanceof THREE.DirectionalLight || obj instanceof THREE.PointLight);
+    });
     // Ambient light
-    const ambientLight = new THREE.AmbientLight(0x404040, isNightMode ? 0.1 : 0.4);
+    const ambientLight = new THREE.AmbientLight(0x404040, isNightMode ? 0.05 : 0.4);
     scene.add(ambientLight);
 
     // Directional light (sun)
-    const directionalLight = new THREE.DirectionalLight(0xffffff, isNightMode ? 0.2 : 0.8);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, isNightMode ? 0.08 : 0.8);
     directionalLight.position.set(50, 50, 25);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 2048;
@@ -184,15 +210,21 @@ const TrafficScene: React.FC = () => {
         { x: -8, z: -8 }, { x: 8, z: -8 },
         { x: -8, z: 8 }, { x: 8, z: 8 }
       ];
-      
       streetLightPositions.forEach(pos => {
-        const pointLight = new THREE.PointLight(0xffee88, 3, 40);
+        const pointLight = new THREE.PointLight(0xffee88, 12, 40);
         pointLight.position.set(pos.x, 5, pos.z);
         pointLight.castShadow = true;
         scene.add(pointLight);
       });
     }
   };
+
+  // Add this useEffect to update lighting instantly when isNightMode changes
+  useEffect(() => {
+    if (sceneRef.current) {
+      setupLighting(sceneRef.current);
+    }
+  }, [isNightMode]);
 
   const createRoadSystem = (scene: THREE.Scene) => {
     // Create textured road material
@@ -395,7 +427,7 @@ const TrafficScene: React.FC = () => {
       const lightMaterial = new THREE.MeshLambertMaterial({ 
         color: isNightMode ? 0xffee88 : 0xcccccc,
         emissive: isNightMode ? 0xffee88 : 0x000000,
-        emissiveIntensity: isNightMode ? 1.5 : 0.0
+        emissiveIntensity: isNightMode ? 5 : 0.0
       });
       const light = new THREE.Mesh(lightGeometry, lightMaterial);
       light.position.y = 5.5;
@@ -464,21 +496,24 @@ const TrafficScene: React.FC = () => {
     const camera = cameraRef.current;
     
     switch (cameraMode) {
-      case 'orbit':
+      case 'orbit': {
         const radius = 25;
         camera.position.x = Math.cos(cameraRotationRef.current.y) * Math.cos(cameraRotationRef.current.x) * radius;
         camera.position.y = Math.sin(cameraRotationRef.current.x) * radius + 10;
         camera.position.z = Math.sin(cameraRotationRef.current.y) * Math.cos(cameraRotationRef.current.x) * radius;
         camera.lookAt(0, 0, 0);
         break;
-      case 'top':
+      }
+      case 'top': {
         camera.position.set(0, 30, 0);
         camera.lookAt(0, 0, 0);
         break;
-      case 'street':
+      }
+      case 'street': {
         camera.position.set(0, 2, 8);
         camera.lookAt(0, 1, 0);
         break;
+      }
     }
   };
 
@@ -570,7 +605,7 @@ const TrafficScene: React.FC = () => {
       light.group.children.forEach(child => {
         if (child.userData.type) {
           const material = (child as THREE.Mesh).material as THREE.MeshLambertMaterial;
-          
+          material.emissiveIntensity = isNightMode ? 2 : 1;
           // Set emissive color based on the light's state
           if (child.userData.type === 'green') {
             material.emissive.setHex(light.state === 'green' ? 0x00ff00 : 0x000000);
@@ -1059,9 +1094,6 @@ const TrafficScene: React.FC = () => {
 
   const toggleNightMode = () => {
     setIsNightMode(prev => !prev);
-    if (sceneRef.current) {
-      setupLighting(sceneRef.current);
-    }
   };
 
   const handleNextCar = () => {
@@ -1089,19 +1121,19 @@ return (
           <div className="text-sm font-bold mb-2">📹 Camera View</div>
           <div className="space-y-1">
             <button
-              onClick={() => setCameraMode('orbit')}
+              onClick={() => handleCameraModeChange('orbit')}
               className={`px-3 py-1 rounded ${cameraMode === 'orbit' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
               Orbit View
             </button>
             <button
-              onClick={() => setCameraMode('top')}
+              onClick={() => handleCameraModeChange('top')}
               className={`px-3 py-1 rounded ${cameraMode === 'top' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
               Top View
             </button>
             <button
-              onClick={() => setCameraMode('street')}
+              onClick={() => handleCameraModeChange('street')}
               className={`px-3 py-1 rounded ${cameraMode === 'street' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
               Street View
@@ -1117,17 +1149,6 @@ return (
             className={`px-3 py-1 rounded ${isNightMode ? 'bg-purple-600' : 'bg-gray-700 hover:bg-gray-600'}`}
           >
             {isNightMode ? '🌙 Night Mode' : '☀️ Day Mode'}
-          </button>
-        </div>
-
-        {/* Manual Controls (for testing) */}
-        <div className="mt-4 border-t border-gray-600 pt-2">
-          <div className="text-sm font-bold mb-2">⚙️ Manual Controls</div>
-          <button
-            onClick={handleNextCar}
-            className="px-3 py-1 rounded bg-green-600 hover:bg-green-500"
-          >
-            Activate Next Car (Debug)
           </button>
         </div>
 
